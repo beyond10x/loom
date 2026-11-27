@@ -1,5 +1,7 @@
 //! Run a routed intent, initializing resources only for the selected protocol.
 
+mod session_host;
+
 use std::io::{Read as _, Write};
 use std::path::Path;
 use std::process::ExitCode;
@@ -238,8 +240,8 @@ fn agent_boundary_ready_command(arguments: &AgentBoundaryReadyArgs) -> ExitCode 
 }
 
 /// The spec of `agent serve` and `agent resume`, read and checked; a refused spec exits 3.
-fn served_spec(path: &Path) -> Result<loom_sdk::agent::AgentSpec, ExitCode> {
-    match agent::read_spec(path) {
+fn served_spec(path: &Path) -> Result<(loom_sdk::agent::AgentSpec, String), ExitCode> {
+    match agent::read_spec_source(path) {
         Ok(spec) => Ok(spec),
         Err(agent::CheckFailure::Refused(refusal)) => {
             eprintln!("b10x-loom: {}", agent::refused_line(&refusal));
@@ -251,7 +253,7 @@ fn served_spec(path: &Path) -> Result<loom_sdk::agent::AgentSpec, ExitCode> {
 
 /// Runs `agent serve`, as `AGENT_SERVE_HELP` states.
 fn agent_serve_command(arguments: &AgentServeArgs) -> ExitCode {
-    let spec = match served_spec(&arguments.spec) {
+    let (spec, source) = match served_spec(&arguments.spec) {
         Ok(spec) => spec,
         Err(exit) => return exit,
     };
@@ -259,7 +261,7 @@ fn agent_serve_command(arguments: &AgentServeArgs) -> ExitCode {
         Ok(state) => state,
         Err(error) => return failed(&error),
     };
-    match agent_serve(arguments, spec, &state) {
+    match agent_serve(arguments, spec, &state, &source) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => failed(&error),
     }
@@ -269,19 +271,32 @@ fn agent_serve(
     arguments: &AgentServeArgs,
     spec: loom_sdk::agent::AgentSpec,
     state: &Path,
+    source: &str,
 ) -> Result<(), String> {
+    if let Some(workspace) = &arguments.session_workspace {
+        return session_host::serve(arguments, spec, source, state, workspace);
+    }
     // The roots of `http` binding reads are settled first, before any model, read or record.
     let trust =
         b10x_loom_agent::http_trust(std::env::var_os(b10x_loom_agent::CA_FILE_ENV).as_deref())
             .map_err(|refused| refused.to_string())?;
     // Both models are settled here, before any model call or read.
-    let (classifier, model) = served_models(
+    let (classifier, model, routing) = agent::served_models(
         &spec,
         &arguments.spec,
         arguments.catalog.as_deref(),
         arguments.model.as_deref(),
         arguments.classifier_model.as_deref(),
     )?;
+    let (classifier, model) = if arguments.once {
+        (classifier, model)
+    } else {
+        let prices = b10x_loom_cli::metering::prices()?;
+        (
+            b10x_loom_cli::metering::observe(classifier, prices.clone()),
+            b10x_loom_cli::metering::observe(model, prices),
+        )
+    };
     let a2a_spec = spec.clone();
     let plugin = b10x_loom_agent::SpecPlugin::new(spec, state)
         .map_err(|e| e.to_string())?
@@ -292,29 +307,53 @@ fn agent_serve(
     if answers_only && arguments.once {
         return Err(a2a::ONCE_WITHOUT_A_CHANNEL.to_owned());
     }
-    let bearer = std::env::var(a2a::BEARER_ENV).ok();
+    let bearer = b10x_loom_cli::dashboard::agent_bearer()?;
     let listening = a2a::prepare(&a2a_spec, arguments.a2a_address, bearer.as_deref())?;
     let stop = Arc::new(AtomicBool::new(arguments.once));
     if !arguments.once {
         stop_on_signals(Arc::clone(&stop))?;
     }
+    // Acquire the same exclusive state lease for either entry point before registering it.
+    let held = b10x_loom_plugin::state::StateDir::open(state, plugin.config())
+        .map_err(|e| e.to_string())?;
+    let dashboard = if arguments.once {
+        None
+    } else {
+        use b10x_loom_cli::dashboard::{A2aIngress, Dashboard, Harness};
+        let ingress = match (
+            &listening,
+            a2a_spec.expose.as_ref().and_then(|e| e.a2a.as_ref()),
+            bearer.as_deref(),
+        ) {
+            (Some((_, socket)), Some(exposure), Some(token)) => {
+                Some(A2aIngress::new(socket, &exposure.path, token)?)
+            }
+            _ => None,
+        };
+        Some(Dashboard::start_resolved(
+            state,
+            &a2a_spec,
+            source,
+            Some(routing),
+            Harness::Native,
+            ingress,
+        )?)
+    };
+    let observer = dashboard.as_ref().map(|dashboard| dashboard.observer());
     if answers_only {
         // Nothing to poll: the host's main loop is the A2A listener, holding the state directory
         // as the polling host does, until SIGTERM or SIGINT.
         let (server, socket) =
             listening.ok_or_else(|| "`expose.a2a` declares no listener".to_owned())?;
-        let held = b10x_loom_plugin::state::StateDir::open(state, plugin.config())
-            .map_err(|e| e.to_string())?;
         let agent = a2a::Agent {
             spec: a2a_spec,
             state,
             classifier,
             model,
             trust,
+            observer,
         };
-        let served = a2a::serve(&server, socket, agent, &stop, &stop);
-        drop(held);
-        return served;
+        return a2a::serve(&server, socket, agent, &stop, &stop);
     }
     let a2a_stop = AtomicBool::new(false);
     let (ran, served) = std::thread::scope(|scope| {
@@ -325,11 +364,13 @@ fn agent_serve(
                 classifier,
                 model,
                 trust,
+                observer: observer.clone(),
             };
             let (a2a_stop, stop) = (&a2a_stop, &stop);
             scope.spawn(move || a2a::serve(&server, socket, agent, a2a_stop, stop))
         });
-        let ran = b10x_loom_plugin::run_plugin(&plugin, plugin.config(), state, &stop);
+        let host = b10x_loom_plugin::Host::new(plugin.config()).with_observer(observer);
+        let ran = b10x_loom_plugin::run_plugin_held(&plugin, &host, &held, &stop);
         a2a_stop.store(true, std::sync::atomic::Ordering::SeqCst);
         let served = serving.map_or(Ok(()), |serving| {
             serving
@@ -344,36 +385,6 @@ fn agent_serve(
         eprintln!("b10x-loom: {}", printable(&note));
     }
     print_proposals(&lines)
-}
-
-/// The classifier and the turn model of a served spec, each shared.
-type ServedModels = (Arc<dyn Model>, Arc<dyn Model>);
-
-/// The classifier and the turn model of a served spec at `path`: with `catalog`, the route
-/// aliases `model` and `classifier` name in it; without, the spec's `model` section.
-fn served_models(
-    spec: &loom_sdk::agent::AgentSpec,
-    path: &Path,
-    catalog: Option<&Path>,
-    model: Option<&str>,
-    classifier: Option<&str>,
-) -> Result<ServedModels, String> {
-    let (classifier, model): (Box<dyn Model>, Arc<dyn Model>) = match catalog {
-        Some(catalog) => {
-            let models = ModelCatalog::read(catalog)?;
-            fn alias<'a>(flag: &str, given: Option<&'a str>) -> Result<&'a str, String> {
-                given.ok_or_else(|| format!("{flag} names no route alias of --catalog"))
-            }
-            let classifier = alias("--classifier-model", classifier)?;
-            let model = alias("--model", model)?;
-            (
-                Box::new(models.model("--classifier-model", classifier)?),
-                Arc::new(models.model("--model", model)?),
-            )
-        }
-        None => agent::spec_models(spec, path, model, classifier)?,
-    };
-    Ok((Arc::from(classifier), model))
 }
 
 /// The exit status of `agent run` for `input`, as `loom.agent.RunOnce` decides it.
@@ -455,7 +466,7 @@ fn agent_run(
     let trust =
         b10x_loom_agent::http_trust(std::env::var_os(b10x_loom_agent::CA_FILE_ENV).as_deref())
             .map_err(|refused| refused.to_string())?;
-    let (classifier, model) = served_models(
+    let (classifier, model, _) = agent::served_models(
         &spec,
         &arguments.spec,
         arguments.catalog.as_deref(),
@@ -480,7 +491,7 @@ fn agent_run(
 
 /// Runs `agent resume`, as `AGENT_RESUME_HELP` states.
 fn agent_resume_command(arguments: &AgentResumeArgs) -> ExitCode {
-    let spec = match served_spec(&arguments.spec) {
+    let (spec, _) = match served_spec(&arguments.spec) {
         Ok(spec) => spec,
         Err(exit) => return exit,
     };

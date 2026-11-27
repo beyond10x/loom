@@ -25,8 +25,12 @@ use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde_json::{Value, json};
 
+#[path = "support/dashboard_launch.rs"]
+mod dashboard_launch;
 #[path = "support/loom.rs"]
 mod loom_bin;
+#[path = "support/served_session.rs"]
+mod served_session;
 
 const CATALOG: &str = include_str!("fixtures/catalog-route/catalog.toml");
 const CLASSIFIER: &str = "example/Classifier-Model";
@@ -700,6 +704,9 @@ runtime:
         let mut command = loom_bin::loom();
         command
             .env("HOME", &home)
+            .env("LOOM_DASHBOARD_DIR", self.root.join("dashboard"))
+            .env_remove("LOOM_DASHBOARD_ADDR")
+            .env_remove("LOOM_DASHBOARD_RATE_CARD")
             .env("CODEX_HOME", &home)
             .env("XDG_DATA_HOME", &home)
             .env_remove("RUST_LOG")
@@ -942,6 +949,17 @@ fn a2a_request(
     bearer: Option<&str>,
     body: Option<&Value>,
 ) -> Option<(u16, String)> {
+    request_with_agent_bearer(port, method, path, bearer, None, body)
+}
+
+fn request_with_agent_bearer(
+    port: u16,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    agent_bearer: Option<&str>,
+    body: Option<&Value>,
+) -> Option<(u16, String)> {
     let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).ok()?;
     stream
         .set_read_timeout(Some(Duration::from_secs(60)))
@@ -950,6 +968,12 @@ fn a2a_request(
     let mut head = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n");
     if let Some(token) = bearer {
         head.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
+    if let Some(credential) = agent_bearer {
+        head.push_str(&format!("X-Loom-Agent-Bearer: {credential}\r\n"));
+    }
+    if !body.is_empty() {
+        head.push_str("Content-Type: application/json\r\n");
     }
     head.push_str(&format!(
         "Content-Length: {}\r\nConnection: close\r\n\r\n",
@@ -1336,6 +1360,66 @@ fn agent_serve_answers_a2a_without_a_channel() {
         assert!(Instant::now() < deadline, "no readiness in 60 s");
         std::thread::sleep(Duration::from_millis(50));
     }
+    let dashboard = scratch.root.join("dashboard");
+    let address: std::net::SocketAddr = fs::read_to_string(dashboard.join("address"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let viewer = fs::read_to_string(dashboard.join("viewer-token")).unwrap();
+    let snapshot = || {
+        let (status, body) = a2a_request(
+            address.port(),
+            "GET",
+            "/api/snapshot",
+            Some(viewer.trim()),
+            None,
+        )
+        .expect("dashboard response");
+        assert_eq!(status, 200, "{body}");
+        serde_json::from_str::<Value>(&body).expect("dashboard snapshot")
+    };
+    let before = snapshot();
+    dashboard_launch::check(
+        &scratch,
+        &catalog,
+        address.port(),
+        viewer.trim(),
+        &before["agents"][0],
+    );
+    let id = before["agents"][0]["id"].as_str().unwrap();
+    assert_eq!(before["agents"][0]["kind"], "agent_spec");
+    assert_eq!(before["agents"][0]["harness"], "native");
+    let dispatch_path = format!("/api/agents/{id}/dispatch");
+    let message = json!({"message_id":"m-1","text":"Is the deploy finished?"});
+    let dispatch = |agent_token: Option<&str>, message: &Value| {
+        request_with_agent_bearer(
+            address.port(),
+            "POST",
+            &dispatch_path,
+            Some(viewer.trim()),
+            agent_token,
+            Some(message),
+        )
+        .unwrap()
+    };
+    for token in [None, Some("wrong")] {
+        let (status, refusal) = dispatch(token, &message);
+        assert_eq!(status, 403, "{refusal}");
+        assert!(refusal.contains("agent_unauthorized"));
+    }
+    let (status, refused) = dispatch(
+        Some(A2A_TOKEN),
+        &json!({"message_id":"bad/id","text":"work"}),
+    );
+    assert_eq!(status, 400, "{refused}");
+    let (status, response) = dispatch(Some(A2A_TOKEN), &message);
+    assert_eq!(status, 200, "{response}");
+    let dashboard_turn: Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(dashboard_turn["state"], "TASK_STATE_COMPLETED");
+    assert_eq!(dashboard_turn["run_id"], snapshot()["runs"][0]["id"]);
+    assert!(!response.contains(REPLY));
+    assert_eq!(dispatch(Some(A2A_TOKEN), &message), (status, response));
     let send = json!({"jsonrpc": "2.0", "id": "q-1", "method": "SendMessage",
         "params": {"message": {"messageId": "m-1", "role": "ROLE_USER",
             "parts": [{"text": "Is the deploy finished?"}]}}});
@@ -1347,6 +1431,47 @@ fn agent_serve_answers_a2a_without_a_channel() {
     let record = &task["artifacts"][0]["parts"][1]["data"];
     assert_eq!(record["outcome"], "proposed", "{answer}");
     assert_eq!(record["proposal"], REPLY, "{answer}");
+
+    // The hosted observation API must account for classification and both requests of
+    // each model-driven step. Retrying a recorded message leads to the same dashboard run.
+    let observed = snapshot();
+    assert_eq!(observed["stats"]["completed"], 1, "{observed}");
+    let agent_id = observed["agents"][0]["id"].as_str().unwrap();
+    let (status, body) = a2a_request(
+        address.port(),
+        "GET",
+        &format!("/api/agents/{agent_id}/routing"),
+        Some(viewer.trim()),
+        None,
+    )
+    .unwrap();
+    assert_eq!(status, 200);
+    let actual: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(actual["source"], "launch_catalog");
+    assert_eq!(actual["agent"]["selection"], "lab-agent");
+    assert_eq!(actual["agent"]["upstream_model"], "example/Agent-Model");
+    assert_eq!(actual["classifier"]["selection"], "lab-classifier");
+    assert_eq!(
+        actual["classifier"]["upstream_model"],
+        "example/Classifier-Model"
+    );
+    assert_eq!(actual["agent"]["base_origin"], base_url);
+    assert_eq!(actual["agent"]["protocol"], "chat-completions");
+    assert_eq!(actual["agent"]["provider_id"], "lab");
+    assert_eq!(actual["agent"]["endpoint_id"], "loopback");
+    assert_eq!(
+        actual["agent"]["binding_revision"].as_str().unwrap().len(),
+        64
+    );
+    assert!(!observed.to_string().contains("example/Agent-Model"));
+    assert_eq!(observed["stats"]["model_calls"], 5, "{observed}");
+    assert_eq!(observed["stats"]["input_tokens"], 600, "{observed}");
+    assert_eq!(observed["stats"]["output_tokens"], 35, "{observed}");
+    assert!(observed["stats"]["cost"].is_null(), "{observed}");
+    let (retry_status, _) = a2a_request(port, "POST", "/a2a", Some(A2A_TOKEN), Some(&send))
+        .expect("replay recorded request");
+    assert_eq!(retry_status, 200);
+    assert_eq!(snapshot()["stats"]["completed"], 1);
 
     let killed = Command::new("kill")
         .args(["-TERM", &child.0.id().to_string()])

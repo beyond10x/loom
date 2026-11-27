@@ -62,6 +62,7 @@ use syn::ext::IdentExt;
 use syn::visit::Visit;
 
 mod binary_linkage;
+mod dashboard_api;
 mod delegation;
 mod docs_stamp;
 mod durable_check;
@@ -107,6 +108,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Project the served dashboard's OpenAPI document from its ESS model and HTTP binding.
+    DashboardApi {
+        /// Fail if the public document differs from the fresh projection.
+        #[arg(long)]
+        check: bool,
+        #[command(flatten)]
+        scratch: Scratch,
+    },
     /// Regenerate intake's Rust model, including the confinement contract.
     IntakeGenerate {
         #[command(flatten)]
@@ -410,6 +419,9 @@ fn run(cli: Cli) -> Result<(), String> {
             let made = shared_trees::make(&root, &scope)?;
             println!("{} (scope {scope})", made.line());
             Ok(())
+        }
+        Command::DashboardApi { check, scratch } => {
+            dashboard_api::run(&root, &cli.ess, &scratch, check)
         }
         Command::CrdGenerate { scratch } => crd_generate(&root, &cli.ess, &scratch),
         Command::CrdDrift { scratch } => crd_drift(&root, &cli.ess, &scratch),

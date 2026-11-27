@@ -20,8 +20,9 @@ use b10x_loom_intake_slice::run::printable;
 use llm_core::Model;
 use loom_protocols::ProtocolCatalog;
 use loom_sdk::agent::AgentSpec;
-use loom_sdk::models::{ModelRole, from_routes};
+use loom_sdk::models::{ModelRole, Models};
 
+use crate::dashboard::routing::{Role, Routing, Source};
 use crate::regular_file;
 
 /// The exit status of a refused spec, as [`crate::AGENT_CHECK_HELP`] states it.
@@ -47,11 +48,14 @@ pub enum CheckFailure {
 /// not UTF-8, or when the plugin catalog cannot be loaded; [`CheckFailure::Refused`] with the
 /// first refusal.
 pub fn check_spec(path: &Path) -> Result<Checked, CheckFailure> {
-    let text = spec_text(path)?;
+    checked_text(&spec_text(path)?)
+}
+
+fn checked_text(text: &str) -> Result<Checked, CheckFailure> {
     let catalog = ProtocolCatalog::plugins()
         .map_err(|why| CheckFailure::Unreadable(format!("the plugin catalog: {why}")))?;
     let actions = |name: &str| catalog.get(name).map(|entry| entry.actions());
-    check_text(&text, &actions).map_err(CheckFailure::Refused)
+    check_text(text, &actions).map_err(CheckFailure::Refused)
 }
 
 /// The text of the spec at `path`, read as [`check_spec`] reads it.
@@ -71,10 +75,27 @@ fn spec_text(path: &Path) -> Result<String, CheckFailure> {
 /// # Errors
 /// As [`check_spec`].
 pub fn read_spec(path: &Path) -> Result<AgentSpec, CheckFailure> {
-    check_spec(path)?;
+    read_spec_source(path).map(|(spec, _)| spec)
+}
+
+/// Read and validate a single immutable copy of the file, returning its SHA-256 alongside the spec.
+///
+/// # Errors
+/// As [`check_spec`].
+pub fn read_spec_revision(path: &Path) -> Result<(AgentSpec, String), CheckFailure> {
+    read_spec_source(path).map(|(spec, source)| (spec, crate::dashboard::digest(source.as_bytes())))
+}
+
+/// The decoded agent and the exact validated text from the same bounded file read.
+///
+/// # Errors
+/// As [`check_spec`].
+pub fn read_spec_source(path: &Path) -> Result<(AgentSpec, String), CheckFailure> {
     let text = spec_text(path)?;
-    loom_sdk::agent::parse(&text)
-        .map_err(|error| CheckFailure::Unreadable(format!("--spec {}: {error}", path.display())))
+    checked_text(&text)?;
+    let spec = loom_sdk::agent::parse(&text)
+        .map_err(|error| CheckFailure::Unreadable(format!("--spec {}: {error}", path.display())))?;
+    Ok((spec, text))
 }
 
 /// The models of a served spec: the classifier, then the turn model.
@@ -93,11 +114,24 @@ pub fn spec_models(
     model: Option<&str>,
     classifier: Option<&str>,
 ) -> Result<SpecModels, String> {
+    spec_models_with_routing(spec, path, model, classifier).map(|(models, _)| models)
+}
+
+/// The selected operator-visible bindings alongside their ports. Reads the routes file once.
+/// # Errors
+/// As in [`spec_models`].
+pub fn spec_models_with_routing(
+    spec: &AgentSpec,
+    path: &Path,
+    model: Option<&str>,
+    classifier: Option<&str>,
+) -> Result<(SpecModels, Routing), String> {
     let routes: PathBuf = path.parent().map_or_else(
         || PathBuf::from(&spec.model.routes),
         |dir| dir.join(&spec.model.routes),
     );
-    let served = |role: ModelRole, name: &str, flag: &str, given: Option<&str>| {
+    let mut document = None;
+    let mut served = |role: ModelRole, name: &str, flag: &str, given: Option<&str>| {
         let model_name = match given {
             Some(given) => given.to_owned(),
             None => spec
@@ -114,8 +148,12 @@ pub fn spec_models(
                     )
                 })?,
         };
-        let model = from_routes(&routes, &model_name)
-            .map_err(|error| format!("the role `{name}` ({flag} {model_name}): {error}"))?;
+        let error = |error| format!("the role `{name}` ({flag} {model_name}): {error}");
+        let models = match &document {
+            Some(models) => models,
+            None => document.insert(Models::load(&routes).map_err(error)?),
+        };
+        let model = models.model(&model_name).map_err(error)?;
         let capabilities = model.capabilities();
         if !capabilities.tools || !capabilities.tool_choice {
             return Err(format!(
@@ -123,16 +161,76 @@ pub fn spec_models(
                  tool call"
             ));
         }
-        Ok(model)
+        let target = models.routes().target(&model_name).map_err(|e| e.message)?;
+        let endpoint = models
+            .routes()
+            .endpoints()
+            .find(|e| e.name() == &target.endpoint)
+            .ok_or("model endpoint disappeared")?;
+        let role = Role::selected(
+            &model_name,
+            model.as_ref(),
+            target.upstream_model.as_str(),
+            endpoint.base_url().as_str(),
+        );
+        Ok((model, role))
     };
-    let classifier = served(
+    let (classifier, classifier_role) = served(
         ModelRole::Classifier,
         "classifier",
         "--classifier-model",
         classifier,
     )?;
-    let agent = served(ModelRole::Agent, "agent", "--model", model)?;
-    Ok((Box::new(ArcModel(classifier)), agent))
+    let (agent, agent_role) = served(ModelRole::Agent, "agent", "--model", model)?;
+    Ok((
+        (Box::new(ArcModel(classifier)), agent),
+        Routing {
+            source: Source::SpecRoutes,
+            agent: agent_role,
+            classifier: classifier_role,
+        },
+    ))
+}
+
+/// The classifier and the turn model of a served spec, each shared.
+pub type ServedModels = (Arc<dyn Model>, Arc<dyn Model>, Routing);
+
+/// The classifier and the turn model of a served spec at `path`: with `catalog`, the route
+/// aliases `model` and `classifier` name in it; without, the spec's `model` section.
+///
+/// # Errors
+/// The requested catalog, role or selected binding cannot be loaded.
+pub fn served_models(
+    spec: &loom_sdk::agent::AgentSpec,
+    path: &Path,
+    catalog: Option<&Path>,
+    model: Option<&str>,
+    classifier: Option<&str>,
+) -> Result<ServedModels, String> {
+    use crate::model_catalog::ModelCatalog;
+    let ((classifier, model), routing): (SpecModels, Routing) = match catalog {
+        Some(catalog) => {
+            let models = ModelCatalog::read(catalog)?;
+            fn alias<'a>(flag: &str, given: Option<&'a str>) -> Result<&'a str, String> {
+                given.ok_or_else(|| format!("{flag} names no route alias of --catalog"))
+            }
+            let classifier = alias("--classifier-model", classifier)?;
+            let model = alias("--model", model)?;
+            let (classifier, classifier_role) =
+                models.selected("--classifier-model", classifier)?;
+            let (model, agent_role) = models.selected("--model", model)?;
+            (
+                (Box::new(classifier), Arc::new(model)),
+                Routing {
+                    source: Source::LaunchCatalog,
+                    agent: agent_role,
+                    classifier: classifier_role,
+                },
+            )
+        }
+        None => spec_models_with_routing(spec, path, model, classifier)?,
+    };
+    Ok((Arc::from(classifier), model, routing))
 }
 
 /// A boxed view of a shared model.

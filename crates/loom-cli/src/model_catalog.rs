@@ -125,4 +125,26 @@ impl ModelCatalog {
         }
         Ok(port)
     }
+
+    /// The port and its sanitized operator view from this exact validated catalog.
+    /// # Errors
+    /// As in [`Self::model`].
+    pub fn selected(
+        &self,
+        flag: &str,
+        alias: &str,
+    ) -> Result<(Port, crate::dashboard::routing::Role), String> {
+        let model = self.model(flag, alias)?;
+        let binding = self
+            .catalog
+            .binding(&self.routes[alias].serving_model)
+            .ok_or("catalog binding disappeared")?;
+        let role = crate::dashboard::routing::Role::selected(
+            alias,
+            &model,
+            binding.upstream_model(),
+            binding.declaration().endpoint.base_url.as_str(),
+        );
+        Ok((model, role))
+    }
 }

@@ -1,0 +1,194 @@
+format: ess-ui/1
+app: loom_dashboard
+title: Agent dashboard
+model: loom
+actor: from_session
+placement_profile: fat
+fixtures: {dir: fixtures, index: fixtures/index.yaml}
+types:
+  TimeWindow: {record: {from: timestamp, to: timestamp}}
+shells:
+  app:
+    regions:
+      navigation: {kind: navigation}
+      main: {kind: page_outlet}
+navigation:
+  home: overview
+  sections:
+    - {name: fleet, label: Agent fleet, pages: [overview, dispatch]}
+  hidden: [agent, run]
+page_kinds:
+  operation:
+    purpose: Send work to a running agent or start a configured host as a server operator
+  observation:
+    purpose: A read-only view of agent work visible to the current viewer
+pages:
+  dispatch:
+    kind: operation
+    title: Dispatch
+    sections:
+      - name: actions
+        component: record
+        fields: []
+        tabs:
+          - name: send
+            label: Send task
+            form:
+              component: form
+              does: loom.observation.DispatchWork
+              fields:
+                - {field: agent, label: Running agent, as: choice, choice: {component: choice, reads: {view: loom.dashboard.Agents, key: id}, value: id, label: name, note: Show online A2A agents and their observed kind and harness.}}
+                - {field: text, label: Task}
+                - {field: message_id, visible: "false"}
+              submit: {label: Send task}
+              # The transient A2A bearer is the header declared in ess/dashboard/http.yaml.
+          - name: start
+            label: Start agent
+            form:
+              component: form
+              does: loom.observation.LaunchAgent
+              fields:
+                - field: harness
+                  label: Harness
+                  host: AvailableHarnessChoice
+                  stands_in_for: choice
+                  reason: Offer the distinct union of harnesses admitted by any configured template before selecting a template.
+                  reads: {view: loom.dashboard.LaunchTemplates, key: id}
+                - field: template
+                  label: Agent template
+                  host: CompatibleTemplateChoice
+                  stands_in_for: choice
+                  reason: Filter template choices to rows admitting the selected harness and send the exact template identity.
+                  reads: {view: loom.dashboard.LaunchTemplates, key: id}
+                - {field: request_id, visible: "false"}
+              submit: {label: Start agent}
+  overview:
+    kind: observation
+    title: Server overview
+    state:
+      window: {type: TimeWindow, class: page_state, store: url}
+    sections:
+      - name: agents
+        title: Agent fleet
+        component: collection
+        style: cards
+        reads: {view: loom.dashboard.Agents, key: id}
+        columns:
+          - {field: name, label: Agent}
+          - {field: status, label: State, as: badge}
+          - {field: kind, label: Agent kind}
+          - {field: harness, label: Harness}
+          - {field: instance, label: Instance}
+          - {field: last_seen, label: Last seen, as: timestamp}
+          - {field: current, label: Current work}
+        row_actions:
+          - {name: open, label: Open agent, navigate: {to: agent, params: {id: row.id}}}
+        states:
+          loading: skeleton
+          empty: {message: No visible agents.}
+          forbidden: {message: Access denied}
+          stale: {mark: badge}
+          failed: {message: Connection lost., retry: true}
+      - name: interval
+        component: filter_bar
+        binds: [state.window]
+        window: {binds: state.window, time: true}
+        reset: true
+      - name: stats
+        title: Run statistics
+        component: record
+        reads: {view: loom.dashboard.Statistics}
+        fields:
+          - {field: active, label: Active now, as: number}
+          - {field: total, label: Terminal turns, as: number}
+          - {field: completed, label: Completed, as: number}
+          - {field: failed, label: Failed, as: number}
+          - {field: rejected, label: Rejected, as: number}
+          - {field: throughput_per_hour, label: Throughput / hour}
+          - {field: latency_samples, label: Elapsed samples, as: number}
+          - {field: p50_ms, label: Median elapsed}
+          - {field: p95_ms, label: P95 elapsed}
+          - {field: model_calls, label: Model calls}
+          - {field: input_tokens, label: Input tokens}
+          - {field: output_tokens, label: Output tokens}
+          - {field: cost, label: Metered cost}
+          - {field: currency, label: Currency}
+          - {field: coverage, label: Measured turns}
+          - {field: refused_steps, label: Refused steps}
+          - {field: budget_stops, label: Budget stops}
+      - name: completeness
+        component: record
+        reads: {view: loom.dashboard.Snapshot}
+        fields: [{field: partial, label: Partial data}, {field: time, label: Observed, as: timestamp}]
+      - name: history
+        title: Run history
+        component: collection
+        reads: {view: loom.dashboard.Runs, key: id}
+        columns:
+          - {field: item_id, label: Item}
+          - {field: agent_id, label: Agent}
+          - {field: outcome, label: Outcome, as: badge}
+          - {field: ended_at, label: Ended}
+        row_actions:
+          - {name: open, label: Open run, navigate: {to: run, params: {id: row.id}}}
+        states: {empty: {message: No runs in this interval.}}
+  agent:
+    kind: observation
+    title: Agent detail
+    params: {id: string}
+    sections:
+      - name: detail
+        component: record
+        reads: {view: loom.dashboard.AgentById, params: {id: params.id}, key: id}
+        fields:
+          - {field: name, label: Agent}
+          - {field: spec_id, label: Specification}
+          - {field: kind, label: Agent kind}
+          - {field: harness, label: Harness}
+          - {field: spec_revision, label: Spec revision}
+          - {field: protocol, label: Protocol}
+          - {field: a2a_protocol, label: A2A protocol}
+          - {field: poll_interval_seconds, label: Poll interval (seconds)}
+          - {field: model, label: Model}
+          - {field: current, label: Current work}
+        states: {empty: {message: No visible agents.}}
+      - name: source
+        title: View AgentSpec
+        component: record
+        collapsed: true
+        load: on_visible
+        reads: {view: loom.dashboard.AgentSpecById, params: {id: params.id}, key: id}
+        fields: []
+        tabs:
+          - name: profile
+            label: Profile
+            form:
+              host: SpecProfile
+              stands_in_for: record
+              reason: Presents the loaded YAML as an agent profile with model routes, loop flow, states and bindings.
+              reads: {view: loom.dashboard.AgentRoutingById, params: {id: params.id}}
+          - name: yaml
+            label: Source YAML
+            fields: [{field: spec_revision, label: Source revision}, {field: source, label: AgentSpec YAML}]
+        states:
+          loading: spinner
+          empty: {message: No AgentSpec source is available for this agent.}
+          forbidden: {message: Only a server operator can view the AgentSpec source.}
+          failed: {message: Could not load the AgentSpec source., retry: true}
+  run:
+    kind: observation
+    title: Run detail
+    params: {id: string}
+    sections:
+      - name: detail
+        component: record
+        reads: {view: loom.dashboard.RunById, params: {id: params.id}, key: id}
+        fields:
+          - {field: item_id, label: Item}
+          - {field: outcome, label: Outcome}
+          - {field: started_at, label: Started}
+          - {field: ended_at, label: Ended}
+          - {field: events, label: Events}
+          - {field: steps, label: Recorded steps}
+          - {field: stop_reason, label: Stop reason}
+        states: {empty: {message: This run is outside the visible history.}}

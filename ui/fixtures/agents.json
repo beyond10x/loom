@@ -1,0 +1,78 @@
+{
+  "view": "loom.dashboard.Agents",
+  "rows": [
+    {
+      "id": "scout",
+      "name": "Scout",
+      "spec_id": "research",
+      "instance": "scout-1",
+      "model": "recorded",
+      "last_seen": "2026-11-20T12:00:00Z",
+      "status": "working",
+      "current": [
+        {
+          "id": "scout/current",
+          "item_id": "inspect-changes",
+          "action": "inspect files",
+          "started_at": "2026-11-20T11:59:58Z",
+          "steps_left": 4,
+          "model_calls_left": 2,
+          "agent_id": "scout",
+          "cost_micro_usd": null,
+          "cost": null,
+          "model_calls": null,
+          "input_tokens": null,
+          "output_tokens": null,
+          "steps": [],
+          "events": [
+            {
+              "kind": "accepted",
+              "time": "2026-11-20T11:59:58Z"
+            }
+          ],
+          "ended_at": null,
+          "stop_reason": null,
+          "outcome": "running"
+        }
+      ],
+      "spec_revision": "d28d3d29345ed7d2d165f7bb6b47648ec8d7cb728998b770f3f1d9cc22e614ca",
+      "protocol": "system-query@1",
+      "a2a_protocol": "inbound-answer@1",
+      "poll_interval_seconds": 5,
+      "kind": "agent_spec",
+      "harness": "native"
+    },
+    {
+      "id": "reviewer",
+      "name": "Reviewer",
+      "spec_id": "review",
+      "instance": "review-1",
+      "model": null,
+      "last_seen": "2026-11-20T12:00:00Z",
+      "status": "idle",
+      "current": [],
+      "spec_revision": null,
+      "protocol": null,
+      "a2a_protocol": null,
+      "poll_interval_seconds": null,
+      "kind": "agent_spec",
+      "harness": "native"
+    },
+    {
+      "id": "archive",
+      "name": "Archive",
+      "spec_id": "research",
+      "instance": "archive-1",
+      "model": null,
+      "last_seen": "2026-11-19T11:22:00Z",
+      "status": "offline",
+      "current": [],
+      "spec_revision": null,
+      "protocol": null,
+      "a2a_protocol": null,
+      "poll_interval_seconds": null,
+      "kind": null,
+      "harness": null
+    }
+  ]
+}

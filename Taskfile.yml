@@ -23,6 +23,7 @@ tasks:
       - task: spec
       - task: commission:spec
       - task: intake-spec
+      - task: dashboard-ui-check
       - task: ess-gate
       - task: commission:ess-gate
       - task: drift
@@ -45,6 +46,13 @@ tasks:
     desc: Validate the ESS specification.
     cmds:
       - ess specify validate --path ess
+
+  dashboard-ui-check:
+    desc: Validate the fleet dashboard views, UI behavior and packaged Vue bundle.
+    cmds:
+      - ess ui check --path ui/loom.ui.yaml --model ess/dashboard
+      - ess ui test --path ui/loom.ui.yaml ui/tests/overview.yaml
+      - node ui/app/check-bundle.mjs
 
   intake-spec:
     desc: Validate intake's ESS specification.
@@ -196,11 +204,18 @@ tasks:
       SLOT_TIMEOUT: 30m
     cmds:
       - cargo run --locked -p loom-docs -- generate
+      - task: dashboard-api
+
+  dashboard-api:
+    desc: Generate the dashboard HTTP contract for the public reference.
+    cmds:
+      - cargo run --locked -q -p loom-xtask -- dashboard-api
 
   docs-check:
     desc: Fail when an input of the documentation generator, the ess version or a generated file differs from the committed stamp, or a page has a raw admonition title; builds no loom-docs.
     cmds:
       - cargo run --locked -q -p loom-xtask -- docs-stamp --check
+      - cargo run --locked -q -p loom-xtask -- dashboard-api --check
 
   docs-slow:
     desc: The slow lane of the documentation, regenerate every page and contract and fail unless the committed ones and the stamp are equal to them.

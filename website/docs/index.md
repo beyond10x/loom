@@ -75,6 +75,8 @@ Loom is specified in [ESS](https://beyond10x.github.io/ess/)
 ([GitHub](https://github.com/beyond10x/ess)). The [specification reference](/docs/reference/ess)
 is generated from the repository.
 
+The [server dashboard API](./reference/server-api.md) documents the agents and runs a viewer can observe and links to the downloadable OpenAPI contract.
+
 ## Trust
 
 The model is not trusted context. It does not supply identity, authority, case revision, trusted

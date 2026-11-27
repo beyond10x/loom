@@ -613,6 +613,37 @@ errors:
         type: loom.agent.RunRefusalReason
 
 commands:
+  # A served external session consumes one already-authenticated A2A item, after RecordA2aTurn
+  # admitted a new message. The launcher selects the governed session path explicitly. The
+  # workspace and files belong to the operator; model names and inbound text cannot choose them.
+  # SessionExecutor::from_spec validates the enforced tool policy and the declared session kind.
+  - name: loom.agent.AdmitServedSessionTurn
+    input:
+      - {name: kind, type: loom.session.SessionKind}
+      - {name: a2a_only, type: Boolean}
+      - {name: workspace_ready, type: Boolean}
+      - {name: policy_ready, type: Boolean}
+    outcomes:
+      - {name: unsupported, when: kind == Harness, accepts: nothing}
+      - {name: no-ingress, when: a2a_only == false, accepts: nothing}
+      - {name: invalid-workspace, when: workspace_ready == false, accepts: nothing}
+      - {name: refused-policy, when: policy_ready == false, accepts: nothing}
+      - {name: claude-session, when: kind == ClaudeCode, accepts: nothing}
+      - {name: codex-session, accepts: nothing}
+
+  # The governed executor may propose changes in its scratch workspace, finish without changes,
+  # or suspend. The serving host records the decision and returns a terminal A2A answer. A
+  # suspension or an unapproved effect leaves the workspace untouched. A successful proposal
+  # is only a proposal; applying it requires the ordinary, separate Commission effect path.
+  - name: loom.agent.EndServedSessionTurn
+    input:
+      - {name: suspended, type: Boolean}
+      - {name: proposed_change, type: Boolean}
+    outcomes:
+      - {name: held, when: suspended == true, accepts: nothing}
+      - {name: proposed, when: proposed_change == true, accepts: nothing}
+      - {name: completed-without-change, accepts: nothing}
+
   # Whether the `loom.agent/1` document at `path` can be served: `b10x-loom agent check --spec`.
   # The document and the plugin catalog it is checked against are outside the input, so every
   # refusal is external. The first refusal found is the answer: text that is not one YAML

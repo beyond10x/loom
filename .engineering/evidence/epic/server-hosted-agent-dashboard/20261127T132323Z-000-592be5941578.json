@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T13:23:23Z",
+  "actor": "human:timo",
+  "artifact": "epic:server-hosted-agent-dashboard",
+  "kind": "epic",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "Two live agent serve processes and a Chromium viewer, replay and host restart, 2 completed turns, 10 measured calls",
+    "reference": "crates/loom-cli/src/dashboard/tests.rs"
+  }
+}

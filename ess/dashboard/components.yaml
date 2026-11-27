@@ -1,0 +1,10 @@
+components:
+  - component: dashboard
+    summary: The dashboard observation and operator API on one server.
+    reached_by: network
+    owns: {domains: [loom.observation]}
+    accepts: {commands: [loom.observation.ReadSnapshot, loom.observation.ReadAgentSpec, loom.observation.ReadAgentRouting, loom.observation.ReadLaunchTemplates, loom.observation.LaunchAgent, loom.observation.DispatchWork]}
+  - component: renderer
+    summary: The local views a browser derives from the returned snapshot.
+    reached_by: network
+    owns: {domains: [loom.dashboard]}

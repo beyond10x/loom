@@ -98,6 +98,28 @@ no longer serves the name, or a secret that does not resolve stops the resume be
 call, with exit status 1 and a message that gives the file and the role `agent`. See
 [Run an intent](run-an-intent.md) for the rest of the command.
 
+## Which model does a background agent use?
+
+A native agent's `loom.agent/1` spec has its own `model` section. The path in `model.routes` is relative to the spec file. Each entry in `model.roles` picks a name for the routes document to resolve. The classifier interprets the incoming item. The agent model chooses actions during the turn.
+
+For example, a spec beside the `routes.yaml` shown above could contain this section:
+
+```yaml
+model:
+  routes: routes.yaml
+  roles:
+    - {role: agent, model: shared}
+    - {role: classifier, model: classifier}
+```
+
+Here the agent requests `qwen` at the example gateway, and the classifier requests `anthropic/claude-haiku-4.5` at OpenRouter. With `agent serve`, `--model` and `--classifier-model` override the corresponding names. Launching with `--catalog <path>` selects a separate `llm.catalog/1` document and requires both flags to name aliases in that catalog.
+
+Each Loom host links the Beyond10x `llm` Rust libraries that resolve these settings and send model requests. When two agents select the same gateway URL, their separate host processes send HTTP requests to the same service. They can also point to different providers, or choose different routes for the two roles in one process. The dashboard directory groups agents for observation and operator actions. Each agent resolves its own model configuration at launch.
+
+Open the agent’s profile in the dashboard with an operator token. The registered spec shows the authored role names and routes file. Effective routing shows the selection, upstream model, wire protocol and sanitized endpoint for each role, including any launch overrides. A gateway may perform additional routing behind its advertised endpoint. [Dashboard routing API](../reference/server-api.md#inspect-effective-model-routing)
+
+A served Claude Code or Codex session passes the agent role's model selection to the external harness. The vendor CLI handles its own provider connection. The dashboard shows the session harness and its authored model selection. Native routing details are available for native agents.
+
 ## Load the models from the SDK
 
 A host that embeds Loom reads the same files through `loom_sdk::models`:

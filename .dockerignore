@@ -2,6 +2,7 @@
 target
 **/target
 website/node_modules
+ui/app/node_modules
 website/build
 website/.docusaurus
 .engineering/drafts

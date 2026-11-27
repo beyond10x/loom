@@ -1,0 +1,27 @@
+format: ess-ui-test/1
+document: ../loom.ui.yaml
+tests:
+  - name: fleet opens an agent and its current work
+    steps:
+      - open: overview
+      - expect: {at: pages/overview/sections/agents, rows: [scout, reviewer, archive]}
+      - expect: {at: pages/overview/sections/agents/rows/archive, text: offline}
+      - act: pages/overview/sections/agents/rows/scout/row_actions/open
+      - expect: {at: pages/agent/sections/detail, text: Scout}
+      - expect: {at: pages/agent/sections/detail, text: d28d3d29345ed7d2d165f7bb6b47648ec8d7cb728998b770f3f1d9cc22e614ca}
+      - expect: {at: pages/agent/sections/detail, text: system-query@1}
+      - expect: {at: pages/agent/sections/detail, text: inbound-answer@1}
+  - name: history opens the recorded turn
+    steps:
+      - open: overview
+      - expect: {at: pages/overview/sections/history, rows: 1}
+      - act: pages/overview/sections/history/rows/run-previous/row_actions/open
+      - expect: {at: pages/run/sections/detail, text: prior-inspection}
+  - name: dispatch presents a running agent selector then a launch selector
+    steps:
+      - open: dispatch
+      - expect: {at: pages/dispatch/sections/actions, text: Running agent, not_text: Agent template}
+      - select: pages/dispatch/sections/actions/tabs/start
+      - expect: {at: pages/dispatch/sections/actions, text: Harness, not_text: Running agent}
+      - select: pages/dispatch/sections/actions/tabs/send
+      - expect: {at: pages/dispatch/sections/actions, text: Running agent, not_text: Agent template}

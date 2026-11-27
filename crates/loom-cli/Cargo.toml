@@ -15,6 +15,12 @@ name = "b10x-loom"
 path = "src/main.rs"
 
 [dependencies]
+chrono = "0.4"
+sha2 = "0.11.0"
+serde = { version = "1", features = ["derive"] }
+url = "2"
+httparse = "1"
+subtle = "2"
 b10x-loom-a2a = { path = "../loom-a2a" }
 b10x-loom-agent = { path = "../loom-agent" }
 b10x-loom-boundary = { path = "../loom-boundary" }
@@ -47,10 +53,7 @@ b10x-loom-governor = { path = "../loom-governor", features = ["test-unsynced-sto
 b10x-loom-intake-references = { path = "../loom-intake-references" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice", features = ["test-clock"] }
 b10x-loom-runlog = { path = "../loom-runlog" }
-chrono = "0.4"
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-serde = "1"
 serde_json = "1"
 serde_yaml_ng = "0.10"
-sha2 = "0.11.0"

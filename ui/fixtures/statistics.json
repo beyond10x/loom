@@ -1,0 +1,31 @@
+{
+  "view": "loom.dashboard.Statistics",
+  "rows": [
+    {
+      "active": 1,
+      "total": 1,
+      "completed": 1,
+      "failed": 0,
+      "rejected": 0,
+      "latency_samples": 1,
+      "p50_ms": 2000,
+      "p95_ms": 2000,
+      "model_calls": 2,
+      "input_tokens": 13,
+      "output_tokens": 8,
+      "cost": null,
+      "throughput_per_hour": null,
+      "refused_steps": 0,
+      "budget_stops": 0,
+      "currency": null,
+      "cost_micro_usd": null,
+      "coverage": {
+        "model_calls": 1,
+        "input_tokens": 1,
+        "output_tokens": 1,
+        "cost": 0,
+        "total": 1
+      }
+    }
+  ]
+}

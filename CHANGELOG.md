@@ -12,6 +12,12 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- Background `agent serve` hosts share a dashboard with live work, recorded turns and model usage.
+- Dashboard operators can inspect the exact AgentSpec YAML loaded by a served agent, including its SHA-256 revision.
+- Operators can inspect effective model routes, dispatch A2A tasks, and start agents from registered native or session templates.
+
 ## [0.63.0] - 2026-11-26
 
 ### Added

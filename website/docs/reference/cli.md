@@ -289,6 +289,8 @@ Usage: b10x-loom agent serve [OPTIONS] --spec <FILE>
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
+| `--session-workspace <DIR>` | no | none | Serve the spec's Claude Code or Codex session on A2A, over a private copy of selected files |
+| `--session-file <RELATIVE_PATH>` | no | none | A plain path relative to the session workspace. Repeat for each file to make available |
 | `--spec <FILE>` | yes | none | The loom.agent/1 document, YAML or JSON, in a regular file |
 | `--state <DIR>` | no | none | The host's state directory: its cursors, record, cases, Suspensions, grants and send counter. One host holds it at a time. Without it, the spec's `runtime.state_dir` |
 | `--once` | no | `false` | Run one cycle and stop |

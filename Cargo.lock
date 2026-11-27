@@ -467,6 +467,7 @@ dependencies = [
  "b10x-loom-tree",
  "chrono",
  "clap",
+ "httparse",
  "intake",
  "libc",
  "rcgen",
@@ -475,8 +476,10 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "sha2 0.11.0",
+ "subtle",
  "tempfile",
  "tokio",
+ "url",
 ]
 
 [[package]]

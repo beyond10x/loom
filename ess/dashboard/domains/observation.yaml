@@ -1,0 +1,185 @@
+domain: loom.observation
+summary: >-
+  The dashboard HTTP boundary for one Loom server. Scoped viewers read authorized observations.
+  Operators can inspect host configuration, dispatch work and launch a configured agent.
+
+types:
+  - name: loom.observation.LaunchKey
+    kind: newtype
+    of: String
+    alphabet: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+  - name: loom.observation.MessageId
+    kind: newtype
+    of: String
+    alphabet: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+  - name: loom.observation.RunId
+    kind: newtype
+    of: String
+    alphabet: "0123456789abcdef"
+  - name: loom.observation.DispatchState
+    kind: enum
+    variants: [TASK_STATE_COMPLETED, TASK_STATE_REJECTED, TASK_STATE_FAILED]
+
+errors:
+  - {name: loom.observation.AgentBearerRequired, naming: {wire: agent_unauthorized}}
+  - {name: loom.observation.AgentUnavailable, naming: {wire: agent_unavailable}}
+  - {name: loom.observation.DispatchUnavailable, naming: {wire: dispatch_unavailable}}
+  - {name: loom.observation.InvalidQuery, naming: {wire: invalid_request}}
+  - {name: loom.observation.ViewerRequired, naming: {wire: unauthorized}}
+  - {name: loom.observation.NoViewerConfig, naming: {wire: viewer_configuration_unavailable}}
+  - {name: loom.observation.NoSnapshot, naming: {wire: snapshot_unavailable}}
+  - {name: loom.observation.UnknownAgent, naming: {wire: not_found}}
+  - {name: loom.observation.Forbidden, naming: {wire: forbidden}}
+  - {name: loom.observation.NoSpec, naming: {wire: spec_unavailable}}
+  - {name: loom.observation.NoRouting, naming: {wire: routing_unavailable}}
+  - {name: loom.observation.NoTemplates, naming: {wire: template_configuration_unavailable}}
+  - {name: loom.observation.UnknownTemplate, naming: {wire: template_not_found}}
+  - {name: loom.observation.RequestConflict, naming: {wire: request_conflict}}
+  - {name: loom.observation.StateConflict, naming: {wire: state_conflict}}
+  - {name: loom.observation.LaunchUnavailable, naming: {wire: launch_unavailable}}
+
+actors:
+  - name: loom.observation.ScopedViewer
+    may: [loom.observation.ReadSnapshot]
+  - name: loom.observation.Operator
+    may: [loom.observation.ReadSnapshot, loom.observation.ReadAgentSpec, loom.observation.ReadAgentRouting, loom.observation.ReadLaunchTemplates, loom.observation.LaunchAgent, loom.observation.DispatchWork]
+
+commands:
+  - name: loom.observation.DispatchWork
+    naming:
+      summary: Send one bounded text message to a registered host with the dashboard operator credential and the host’s A2A bearer.
+    input:
+      - {name: agent, type: String}
+      - {name: message_id, type: loom.observation.MessageId}
+      - {name: text, type: String}
+    response:
+      - {name: run_id, type: loom.observation.RunId}
+      - {name: state, type: loom.observation.DispatchState}
+    outcomes:
+      - {name: denied, external: The operator did not authenticate., error: loom.observation.ViewerRequired}
+      - {name: forbidden, external: A scoped viewer attempted to dispatch., error: loom.observation.Forbidden}
+      - {name: agent-denied, external: The caller lacks the target agent bearer., error: loom.observation.AgentBearerRequired}
+      - {name: invalid, external: The request is malformed or its message is blank or exceeds 16384 UTF-8 bytes., error: loom.observation.InvalidQuery}
+      - {name: not-found, external: The registered agent does not exist., error: loom.observation.UnknownAgent}
+      - {name: offline, external: The host is offline or lacks an A2A listener., error: loom.observation.AgentUnavailable}
+      - {name: unavailable-viewers, external: The private viewer configuration cannot be read., error: loom.observation.NoViewerConfig}
+      - {name: unavailable-dispatch, external: The listener could not return a terminal task., error: loom.observation.DispatchUnavailable}
+      - {name: dispatched, returns: true}
+
+  - name: loom.observation.ReadLaunchTemplates
+    response:
+      - {name: templates, type: List<loom.dashboard.LaunchTemplate>}
+    outcomes:
+      - {name: denied, external: The operator did not authenticate., error: loom.observation.ViewerRequired}
+      - {name: forbidden, external: A scoped viewer attempted to list templates., error: loom.observation.Forbidden}
+      - {name: invalid, external: The operator supplied a query parameter., error: loom.observation.InvalidQuery}
+      - {name: unavailable-viewers, external: The private viewer configuration cannot be read., error: loom.observation.NoViewerConfig}
+      - {name: unavailable-templates, external: The private launch configuration cannot be read., error: loom.observation.NoTemplates}
+      - {name: listed, returns: true}
+
+  - name: loom.observation.LaunchAgent
+    input:
+      - {name: template, type: loom.observation.LaunchKey}
+      - {name: request_id, type: loom.observation.LaunchKey}
+      - {name: harness, type: Optional<loom.dashboard.Harness>}
+    response:
+      - {name: agent_id, type: String}
+      - {name: instance, type: String}
+      - {name: status, type: loom.dashboard.LaunchStatus}
+      - {name: kind, type: loom.dashboard.AgentKind}
+      - {name: harness, type: loom.dashboard.Harness}
+    outcomes:
+      - {name: denied, external: The operator did not authenticate., error: loom.observation.ViewerRequired}
+      - {name: forbidden, external: A scoped viewer attempted to launch a host., error: loom.observation.Forbidden}
+      - {name: invalid, external: The query or JSON request is invalid., error: loom.observation.InvalidQuery}
+      - {name: unknown-template, external: The template ID is unknown., error: loom.observation.UnknownTemplate}
+      - {name: request-conflict, external: The request ID belongs to a different launch., error: loom.observation.RequestConflict}
+      - {name: state-conflict, external: The template state directory is held by an incompatible registration., error: loom.observation.StateConflict}
+      - {name: unavailable-viewers, external: The private viewer configuration cannot be read., error: loom.observation.NoViewerConfig}
+      - {name: unavailable-templates, external: The private launch configuration cannot be read., error: loom.observation.NoTemplates}
+      - {name: unavailable-launch, external: The process could not start or register., error: loom.observation.LaunchUnavailable}
+      - {name: existing, external: The request already has a saved receipt or its compatible host is already running., returns: true}
+      - {name: started, returns: true}
+
+  - name: loom.observation.ReadAgentRouting
+    input:
+      - {name: agent, type: String}
+    response:
+      - {name: routing, type: loom.dashboard.AgentRouting}
+    outcomes:
+      - name: denied
+        external: The request did not authenticate a viewer.
+        error: loom.observation.ViewerRequired
+      - name: forbidden
+        external: A scoped viewer attempted to read resolved model routing.
+        error: loom.observation.Forbidden
+      - name: not-found
+        external: The agent ID has no registered routing.
+        error: loom.observation.UnknownAgent
+      - name: invalid
+        external: The request supplies a query string or malformed request headers.
+        error: loom.observation.InvalidQuery
+      - name: unavailable-viewers
+        external: The private viewer configuration cannot be read.
+        error: loom.observation.NoViewerConfig
+      - name: unavailable-routing
+        external: The private routing record could not be read.
+        error: loom.observation.NoRouting
+      - name: read
+        returns: true
+
+  - name: loom.observation.ReadSnapshot
+    input:
+      - {name: agent, type: Optional<String>}
+      - {name: from, type: Optional<Timestamp>}
+      - {name: to, type: Optional<Timestamp>}
+    response:
+      - {name: snapshot, type: loom.dashboard.SnapshotData}
+    outcomes:
+      - name: denied
+        external: The request did not authenticate a viewer.
+        error: loom.observation.ViewerRequired
+      - name: invalid
+        external: The query is malformed or the time interval is empty or inverted.
+        error: loom.observation.InvalidQuery
+      - name: unavailable-viewers
+        external: The private viewer configuration cannot be read.
+        error: loom.observation.NoViewerConfig
+      - name: unavailable-snapshot
+        external: A registered observation cannot be read.
+        error: loom.observation.NoSnapshot
+      - name: forbidden
+        external: The authenticated viewer has no agent grants.
+        error: loom.observation.Forbidden
+      - name: not-found
+        external: The selected agent does not exist in the viewer's scope.
+        error: loom.observation.UnknownAgent
+      - name: observed
+        returns: true
+
+  - name: loom.observation.ReadAgentSpec
+    input:
+      - {name: agent, type: String}
+    response:
+      - {name: source, type: String}
+    outcomes:
+      - name: denied
+        external: The request did not authenticate a viewer.
+        error: loom.observation.ViewerRequired
+      - name: forbidden
+        external: A scoped viewer attempted to read the source.
+        error: loom.observation.Forbidden
+      - name: not-found
+        external: The agent ID has no registered source for this revision.
+        error: loom.observation.UnknownAgent
+      - name: invalid
+        external: The request supplies a query string or malformed request headers.
+        error: loom.observation.InvalidQuery
+      - name: unavailable-viewers
+        external: The private viewer configuration cannot be read.
+        error: loom.observation.NoViewerConfig
+      - name: unavailable-source
+        external: Reading the private source failed or its revision could not be verified.
+        error: loom.observation.NoSpec
+      - name: read
+        returns: true

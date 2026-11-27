@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "7bb20b7366f9de269fd594c0e721815e58bc8a828e4c76483a740fc09d359301",
-    "contract_digest": "3507a46b6773ab76bcd42e01af7dbbdc5c4901e9c7d1125fb92b5bdb5ce623d3"
+    "source_digest": "8fa55f27826b6da4dcb1ef737b6a6c58188a40e19b1bc2841c150311a18ecb11",
+    "contract_digest": "93b10ebd872515f89e059d5e64f0981490f97077345b6e02a01f38c191f911d0"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -2651,6 +2651,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.agent.AdmitServedSessionTurn",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.agent.AdmitServedSessionTurn",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.agent.BoundHttpAnswer",
       "disposition": {
         "disposition": "generated"
@@ -2680,6 +2694,20 @@
           "construct": "the fields of error `loom.agent.SpecRefused`, which the specification gives no source, in `malformed`"
         },
         "contract": "given `loom.agent.CheckAgentSpec` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `malformed` externally decided (the document at the path does not decode as a loom.agent/1 document), error `loom.agent.SpecRefused`; `secret-literal` externally decided (a string of the document holds a credential), error `loom.agent.SpecRefused`; `unknown-format` externally decided (the document's format is not loom.agent/1), error `loom.agent.SpecRefused`; `blank-text` externally decided (a text member of the document is empty or only whitespace), error `loom.agent.SpecRefused`; `not-a-variable-name` externally decided (a bearer_env of the document is not an environment variable name), error `loom.agent.SpecRefused`; `port-out-of-range` externally decided (a port of the document is outside 1 to 65535), error `loom.agent.SpecRefused`; `not-a-plain-path` externally decided (an allow_paths entry of an http binding is not a plain path), error `loom.agent.SpecRefused`; `not-an-instant` externally decided (a Timestamp member of the document is not an RFC 3339 instant), error `loom.agent.SpecRefused`; `unknown-protocol` externally decided (the inner loop names a protocol the plugin catalog does not hold, or a spec with no loops declares states inbound-answer@1 does not admit), error `loom.agent.SpecRefused`; `unknown-action` externally decided (a state names an action the inner loop's protocol does not declare), error `loom.agent.SpecRefused`; `unbound-source` externally decided (a state, the outer loop or the channel names a source no binding declares), error `loom.agent.SpecRefused`; `http-method` externally decided (an http binding's method is not GET), error `loom.agent.SpecRefused`; `send-without-writes` externally decided (reply.send is a capability while writes are none or undeclared), error `loom.agent.SpecRefused`; `empty-channel-allow` externally decided (the channel's allow list is empty), error `loom.agent.SpecRefused`; `serveable` otherwise"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.agent.EndServedSessionTurn",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.agent.EndServedSessionTurn",
+      "disposition": {
+        "disposition": "generated"
       }
     },
     {

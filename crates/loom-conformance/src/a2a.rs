@@ -16,6 +16,14 @@ use b10x_loom_agent::serve::a2a::{
     RecordA2aTurn, RecordA2aTurnOutcome, ServeRefused, a2a_refusal_spelling, admit_a2a_request,
     admit_serve, record_a2a_turn, serve_refusal_spelling,
 };
+use b10x_loom_executor::model::agent::obligations::{
+    AdmitServedSessionTurnBehavior, EndServedSessionTurnBehavior,
+};
+use b10x_loom_executor::model::agent::{
+    AdmitServedSessionTurn, AdmitServedSessionTurnOutcome, EndServedSessionTurn,
+    EndServedSessionTurnOutcome,
+};
+use b10x_loom_executor::model::behaviour::Generated;
 use ess_conformance::target::SemanticCommandResult;
 use ess_primitives::node::Node;
 
@@ -26,6 +34,8 @@ pub(crate) const ADMIT_A2A_REQUEST: &str = "loom.agent.AdmitA2aRequest";
 const A2A_REFUSED: &str = "loom.agent.A2aRefused";
 pub(crate) const RECORD_A2A_TURN: &str = "loom.agent.RecordA2aTurn";
 pub(crate) const ADMIT_SERVE: &str = "loom.agent.AdmitServe";
+pub(crate) const ADMIT_SERVED_SESSION_TURN: &str = "loom.agent.AdmitServedSessionTurn";
+pub(crate) const END_SERVED_SESSION_TURN: &str = "loom.agent.EndServedSessionTurn";
 const SERVE_REFUSED: &str = "loom.agent.ServeRefused";
 
 /// The refusal as `loom.agent.A2aRefused`, `reason` in the enum's spelling.
@@ -71,6 +81,49 @@ fn serve_refusal(branch: &str, refused: &ServeRefused) -> SemanticCommandResult 
     took(ADMIT_SERVE, branch).with_error(error(SERVE_REFUSED).with(
         "reason",
         Node::Text(serve_refusal_spelling(refused.reason).to_owned()),
+    ))
+}
+
+/// Runs the generated admission decision used by the session host before accepting inbound session work.
+pub(crate) fn admit_served_session_turn(input: &Input) -> Option<SemanticCommandResult> {
+    let command = AdmitServedSessionTurn {
+        kind: codec::session_kind(input, "kind")?,
+        a2a_only: codec::boolean(input, "a2a_only")?,
+        workspace_ready: codec::boolean(input, "workspace_ready")?,
+        policy_ready: codec::boolean(input, "policy_ready")?,
+    };
+    let outcome = Generated::new(())
+        .admit_served_session_turn(command)
+        .expect("all session admission guards are total over the decoded inputs");
+    Some(took(
+        ADMIT_SERVED_SESSION_TURN,
+        match outcome {
+            AdmitServedSessionTurnOutcome::Unsupported => "unsupported",
+            AdmitServedSessionTurnOutcome::NoIngress => "no-ingress",
+            AdmitServedSessionTurnOutcome::InvalidWorkspace => "invalid-workspace",
+            AdmitServedSessionTurnOutcome::RefusedPolicy => "refused-policy",
+            AdmitServedSessionTurnOutcome::ClaudeSession => "claude-session",
+            AdmitServedSessionTurnOutcome::CodexSession => "codex-session",
+        },
+    ))
+}
+
+/// Runs the same generated completion decision as the governed session's record writer.
+pub(crate) fn end_served_session_turn(input: &Input) -> Option<SemanticCommandResult> {
+    let command = EndServedSessionTurn {
+        suspended: codec::boolean(input, "suspended")?,
+        proposed_change: codec::boolean(input, "proposed_change")?,
+    };
+    let outcome = Generated::new(())
+        .end_served_session_turn(command)
+        .expect("all session completion guards are total over the decoded inputs");
+    Some(took(
+        END_SERVED_SESSION_TURN,
+        match outcome {
+            EndServedSessionTurnOutcome::Held => "held",
+            EndServedSessionTurnOutcome::Proposed => "proposed",
+            EndServedSessionTurnOutcome::CompletedWithoutChange => "completed-without-change",
+        },
     ))
 }
 

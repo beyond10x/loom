@@ -23,6 +23,8 @@ pub const INBOUND_ANSWER_YAML: &str = include_str!("../../../protocols/inbound-a
 /// Loom's protocol a plugin turn answers an inbound item under and sends the proposed reply:
 /// `inbound-answer@1` plus `reply.send`. Plugin catalog only.
 pub const OPERATOR_REPLY_YAML: &str = include_str!("../../../protocols/operator-reply/1.yaml");
+/// The protocol a served external session uses to record a proposal without applying it.
+pub const SESSION_PROPOSAL: &str = "session-proposal@1";
 /// The vendored engineering definitions, `protocols/engineering/<name>/<major>.yaml`, as (path
 /// below `protocols/engineering/`, bytes), sorted by path: every file of that directory other than
 /// `lock.json`, whatever its name, so a file the lock does not name reaches its check.
@@ -182,6 +184,21 @@ pub struct ProtocolCatalog {
     entries: BTreeMap<String, ProtocolEntry>,
 }
 impl ProtocolCatalog {
+    /// The isolated proposal protocol used by the governed session host.
+    pub fn session_proposals() -> Result<Self, String> {
+        let mut catalog = Self::default();
+        catalog.add_yaml(
+            SESSION_PROPOSAL,
+            include_str!("../../../protocols/session-proposal/1.yaml"),
+            ProtocolSource {
+                kind: SourceKind::Loom,
+                location: "loom".into(),
+                revision: env!("CARGO_PKG_VERSION").into(),
+                path: "protocols/session-proposal/1.yaml".into(),
+            },
+        )?;
+        Ok(catalog)
+    }
     /// Engineering definitions plus Loom's built-in system query.
     pub fn bundled() -> Result<Self, String> {
         let mut catalog = Self::engineering()?;

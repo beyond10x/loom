@@ -45,6 +45,7 @@ pub use b10x_loom_a2a::admit::{
 };
 pub use b10x_loom_a2a::{a2a_refusal_spelling, admit_a2a_request};
 use b10x_loom_plugin::effects::HttpSources;
+use b10x_loom_plugin::observe::{Attempt, Events, TurnObserver};
 use b10x_loom_plugin::project::SEND;
 use b10x_loom_plugin::state::{HeldRecord, StateDir};
 use b10x_loom_plugin::turn::{TURN_MODEL_BUDGET, TURN_STEP_BUDGET, stopped};
@@ -63,6 +64,37 @@ pub use loom::agent::{
     AdmitServe, AdmitServeOutcome, RecordA2aTurn, RecordA2aTurnOutcome, ServeRefusalReason,
     ServeRefused,
 };
+
+/// The validated externally served session kind, decided by the agent ESS domain.
+pub fn session_admission(
+    spec: &AgentSpec,
+    workspace_ready: bool,
+    policy_ready: bool,
+) -> Result<loom_sdk::agent::SessionKind, String> {
+    use loom::agent::obligations::AdmitServedSessionTurnBehavior as _;
+    use loom::agent::{AdmitServedSessionTurn, AdmitServedSessionTurnOutcome as Outcome};
+    let session = spec
+        .session
+        .as_ref()
+        .ok_or("a session host requires session.kind")?;
+    let outcome = loom::behaviour::Generated::new(())
+        .admit_served_session_turn(AdmitServedSessionTurn {
+            kind: session.kind,
+            a2a_only: spec.channel.is_none() && serve_input(spec).a2a,
+            workspace_ready,
+            policy_ready,
+        })
+        .map_err(|e| e.to_string())?;
+    match outcome {
+        Outcome::ClaudeSession | Outcome::CodexSession => Ok(session.kind),
+        Outcome::Unsupported => Err("a session host requires ClaudeCode or Codex".into()),
+        Outcome::NoIngress => Err("a session host requires expose.a2a and no channel".into()),
+        Outcome::InvalidWorkspace => {
+            Err("a session host requires a workspace and a list of plain relative files".into())
+        }
+        Outcome::RefusedPolicy => Err("a session host cannot enforce the authored policy".into()),
+    }
+}
 
 /// Decides `loom.agent.RecordA2aTurn` (`ess/domains/agent.yaml`): a message whose item the record
 /// has a line for already is `replayed`, answered with that line and no turn; one whose turn ran
@@ -310,7 +342,7 @@ pub struct Answering<'a> {
     plugin: &'a SpecPlugin,
     host: Host<'a>,
     record: OnceLock<HeldRecord>,
-    unrecorded: Unrecorded,
+    unrecorded: RecordedAnswers,
 }
 
 impl<'a> Answering<'a> {
@@ -325,7 +357,7 @@ impl<'a> Answering<'a> {
             plugin,
             host,
             record: OnceLock::new(),
-            unrecorded: Unrecorded::default(),
+            unrecorded: RecordedAnswers::default(),
         }
     }
 
@@ -392,7 +424,36 @@ impl Answerer for Answering<'_> {
         let record = self
             .record()
             .map_err(|error| failed(RECORD_UNREADABLE, &error))?;
-        answered(record, &self.unrecorded, item, || self.turn(item, events))
+        self.unrecorded
+            .answer(record, item, events, self.host.observer(), |sink| {
+                self.turn(item, sink)
+            })
+    }
+}
+
+/// Durable A2A replay, bounded unrecorded-turn suppression, and observation shared by hosts.
+#[derive(Default)]
+pub struct RecordedAnswers(Unrecorded);
+
+impl RecordedAnswers {
+    /// Runs a new item once and records its result. A committed duplicate returns its first line.
+    pub fn answer(
+        &self,
+        record: &HeldRecord,
+        item: &InboundItem,
+        events: &mut dyn EventSink,
+        observer: Option<&dyn TurnObserver>,
+        turn: impl FnOnce(&mut dyn EventSink) -> Result<RecordLine, String>,
+    ) -> Result<RecordLine, String> {
+        let mut attempt = None;
+        let result = answered(record, &self.0, item, || {
+            attempt = Some(Attempt::start(observer, &item.id.0));
+            turn(&mut Events::new(observer, &item.id.0, Some(events)))
+        });
+        if let Some(attempt) = attempt {
+            attempt.finish(result.as_ref().ok(), result.is_err());
+        }
+        result
     }
 }
 

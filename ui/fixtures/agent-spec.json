@@ -1,0 +1,10 @@
+{
+  "view": "loom.dashboard.AgentSpecById",
+  "rows": [
+    {
+      "id": "scout",
+      "source": "# Demo source; preserved comments and quoting\nformat: loom.agent/1\nagent:\n  id: scout\n  name: 'Scout'\n  brief: |\n    Display <markup> literally.\n",
+      "spec_revision": "5bb188b029a7c6bbb3bca8115becb7273cdb6da72bc8cfe65cdeef1e6cbf77e9"
+    }
+  ]
+}
